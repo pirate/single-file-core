@@ -2,11 +2,31 @@
 
 [`../vendor/css-tree.js`](../vendor/css-tree.js) is a custom build of
 [@eslint/css-tree](https://www.npmjs.com/package/@eslint/css-tree), the ESLint
-fork of [css-tree](https://www.npmjs.com/package/css-tree), with four patches
-applied to the npm sources. The fork is installed under the `css-tree` alias in
-`package.json`. It is maintained where upstream is not, and it parses nested
-rules that upstream 3.2.1 kept as raw text, but it still carries the four
-defects below.
+fork of [css-tree](https://www.npmjs.com/package/css-tree), with a token-stream
+overlay and URL patches applied to the npm sources. The fork is installed under
+the `css-tree` alias in `package.json` and supports nested rules.
+
+`TokenStream.js` replaces the dependency's token stream at build time. Packed
+27-bit offsets wrap at 128 MiB, corrupting token types and offsets in large
+stylesheets containing embedded resources. The overlay keeps a full 32-bit
+offset and token type in an exact Float64 integer, and grows token and balance
+buffers by token count rather than source length. Large URLs and comments then
+need storage for their tokens, not every character. The root balance sentinel
+is handled explicitly so reused buffers cannot introduce stale bracket state.
+The dependency source hash is checked before applying the overlay; review it
+when upgrading. Its MIT notice is preserved in `TokenStream.LICENSE`.
+
+Token storage uses 12 rather than 8 bytes per allocated slot, a 50% premium
+for dense input at equal capacity. Buffers grow geometrically and retain their
+capacity for reuse. This trades dense-token memory for correct large offsets
+and much smaller allocations on sparse, resource-heavy stylesheets. Regression
+suites cover the 128 MiB boundary, dense input, malformed brackets and reuse.
+
+## Previous TokenStream patches
+
+The overlay replaces the two patches described below. Their measurements and
+upstream reports explain the original fixes. The overflow is also tracked at
+https://github.com/eslint/csstree/issues/174.
 
 `lib/tokenizer/TokenStream.js`: the token offset field is widened from 24 to
 27 bits (`OFFSET_MASK`/`TYPE_SHIFT`, with unsigned shifts for the token type).
@@ -30,6 +50,8 @@ most one token per character and `sourceLength` is the initial balance
 sentinel, so the bounded fill covers exactly what the tokenizer reads. The
 pass went from 180s to 12s on that page with byte-identical output. Reported upstream as
 https://github.com/csstree/csstree/issues/379.
+
+## URL patches
 
 `lib/utils/url.js`: `decode()` trims the whitespace at the end of an unquoted
 `url()` before decoding the escapes, so a value ending in an escaped space,
